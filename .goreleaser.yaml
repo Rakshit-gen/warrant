@@ -1,0 +1,59 @@
+# Release builds for warrant. Tag vX.Y.Z and the release workflow runs this.
+version: 2
+
+project_name: warrant
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: warrant
+    main: ./cmd/warrant
+    binary: warrant
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+  - id: warrantd
+    main: ./cmd/warrantd
+    binary: warrantd
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+  - id: banksim
+    main: ./cmd/banksim
+    binary: banksim
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w"]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md, LICENSE, DESIGN.md]
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+
+release:
+  github:
+    owner: Rakshit-gen
+    name: warrant
+  footer: |
+    Install:
+
+    ```
+    curl -fsSL https://raw.githubusercontent.com/Rakshit-gen/warrant/main/scripts/install.sh | sh
+    ```
