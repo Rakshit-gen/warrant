@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: warrant
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U warrant" --health-interval 2s --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - name: test
+        env:
+          WARRANT_TEST_DB: postgres://warrant@localhost:5432/warrant?sslmode=disable
+        run: go test -race ./...
+      - name: eval and bench smoke run
+        env:
+          WARRANT_DB: postgres://warrant@localhost:5432/warrant?sslmode=disable
+        run: |
+          go run ./cmd/warrant eval -n 3 -out /tmp/eval.json
+          go run ./cmd/warrant bench -mandates 20 -requests 400 -out /tmp/bench.json
+      - name: wasm verifier builds
+        run: GOOS=js GOARCH=wasm go build -o /dev/null ./cmd/verify-wasm
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
