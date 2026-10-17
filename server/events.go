@@ -75,3 +75,62 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// RelayOutbox sends outbox rows to Kafka until ctx ends. Rows are written
+// in the same transaction as the change they describe, so a consumer sees
+// every committed change at least once, keyed by mandate so one mandate's
+// events stay in order on a partition.
+func (s *Server) RelayOutbox(ctx context.Context, brokers []string) error {
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.AllowAutoTopicCreation(), kgo.RequiredAcks(kgo.AllISRAcks()))
+	if err != nil {
+		return err
+	}
+	defer cl.Close()
+	for ctx.Err() == nil {
+		n, err := s.relayOnce(ctx, cl)
+		if err != nil && ctx.Err() == nil {
+			s.log.Error("outbox relay", "err", err)
+		}
+		if n == 0 || err != nil {
+			select {
+			case <-ctx.Done():
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Server) relayOnce(ctx context.Context, cl *kgo.Client) (int, error) {
+	sent := 0
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, topic, key, payload FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`)
+		if err != nil {
+			return err
+		}
+		var ids []int64
+		var recs []*kgo.Record
+		for rows.Next() {
+			var id int64
+			var topic, key string
+			var payload []byte
+			if err := rows.Scan(&id, &topic, &key, &payload); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+			recs = append(recs, &kgo.Record{Topic: topic, Key: []byte(key), Value: payload})
+		}
+		if err := rows.Err(); err != nil || len(ids) == 0 {
+			return err
+		}
+		if err := cl.ProduceSync(ctx, recs...).FirstErr(); err != nil {
+			return err
+		}
+		sent = len(ids)
+		_, err = tx.Exec(ctx, `UPDATE outbox SET sent_at = now() WHERE id = ANY($1)`, ids)
+		return err
+	})
+	if sent > 0 {
+		s.m.add("warrant_outbox_sent_total", float64(sent))
+	}
+	return sent, err
+}
