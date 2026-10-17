@@ -5,7 +5,7 @@ import { CopyCommand } from "@/components/copy-command";
 import { Playground } from "@/components/playground";
 import { Liability } from "@/components/liability";
 import { HeroSlip } from "@/components/hero-slip";
-import { Guilloche } from "@/components/guilloche";
+import { LogTree } from "@/components/log-tree";
 import { familyLabel, mode, pct, rupees, story } from "@/lib/data";
 import { installCmd } from "@/lib/site";
 
@@ -20,8 +20,12 @@ export default function Home() {
 
   return (
     <div className="mx-auto max-w-6xl px-5">
-      <section className="relative isolate pt-14 pb-12 lg:pt-20">
-        <Guilloche className="absolute inset-y-0 left-1/2 -z-10 h-full w-screen -translate-x-1/2" />
+      <section className="relative isolate pt-14 pb-[13rem] lg:pt-20">
+        <LogTree className="absolute inset-y-0 left-1/2 -z-10 h-full w-screen -translate-x-1/2" />
+        <p className="absolute bottom-4 left-0 max-w-xs text-[0.78rem] leading-snug text-ink-faint">
+          warrant&apos;s log as payments come in: every record is a leaf, pairs hash into a Merkle tree, and
+          the tree gets signed. The outcomes here are random.
+        </p>
         <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
           <div className="lg:pt-8">
             <h1 className="text-[2.4rem] leading-[1.06] font-bold tracking-tight sm:text-[3.3rem]">
