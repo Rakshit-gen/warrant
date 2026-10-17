@@ -106,3 +106,120 @@ code.c {
   background-repeat: repeat-x;
   height: 1px;
 }
+
+/*
+ * Motion that carries state: a verdict lands like a rubber stamp, a
+ * checkpoint lands as the request reaches it, a step-up waits. Nothing
+ * moves just to move.
+ */
+@keyframes stamp {
+  0% {
+    opacity: 0;
+    transform: scale(1.45) rotate(-4deg);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(0.97) rotate(-1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.stamp {
+  display: inline-block;
+  transform-origin: left center;
+  animation: stamp 260ms ease-out both;
+}
+
+@keyframes land {
+  0% {
+    transform: scale(1.6);
+  }
+  100% {
+    transform: none;
+  }
+}
+.land {
+  animation: land 220ms ease-out;
+}
+
+@keyframes waiting {
+  50% {
+    box-shadow: 0 0 0 5px var(--asked-tint);
+  }
+}
+.waiting {
+  animation: waiting 1.1s ease-in-out infinite;
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+.reveal {
+  animation: reveal 200ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp,
+  .land,
+  .waiting,
+  .reveal {
+    animation: none;
+  }
+}
+
+/* The hero's stamps: pressed down at an angle, the way a clerk would. */
+@keyframes stamp-big {
+  0% {
+    opacity: 0;
+    transform: scale(1.8) rotate(0deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.94) rotate(var(--tilt, -4deg));
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(var(--tilt, -4deg));
+  }
+}
+.stamp-big {
+  transform-origin: center;
+  animation: stamp-big 280ms ease-out both;
+}
+
+/* A new slip slides in from the right, like the next one in the tray. */
+@keyframes slip {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+.slip {
+  animation: slip 260ms ease-out;
+}
+
+/* How long until the hero moves to the next request. */
+@keyframes countdown {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+.countdown {
+  animation: countdown linear both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-big,
+  .slip,
+  .countdown {
+    animation: none;
+  }
+}

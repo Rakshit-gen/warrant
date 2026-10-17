@@ -2,6 +2,10 @@ import Link from "next/link";
 import { Ledger } from "@/components/ledger";
 import { SlippedBars } from "@/components/bars";
 import { CopyCommand } from "@/components/copy-command";
+import { Playground } from "@/components/playground";
+import { Liability } from "@/components/liability";
+import { HeroSlip } from "@/components/hero-slip";
+import { Guilloche } from "@/components/guilloche";
 import { familyLabel, mode, pct, rupees, story } from "@/lib/data";
 import { installCmd } from "@/lib/site";
 
@@ -16,60 +20,53 @@ export default function Home() {
 
   return (
     <div className="mx-auto max-w-6xl px-5">
-      <section className="grid gap-10 pt-16 pb-14 lg:grid-cols-[1.25fr_1fr] lg:gap-16 lg:pt-24">
-        <div>
-          <h1 className="text-[2.4rem] leading-[1.08] font-bold tracking-tight sm:text-[3.1rem]">
-            An AI agent just paid with your UPI. Was it allowed to?
-          </h1>
-          <div className="prose-w mt-6 max-w-xl text-[1.06rem]">
-            <p>
-              This year Razorpay and NPCI let people pay through AI assistants in pilots. In September NPCI put
-              its agent payment protocol on hold until there are safeguards. The open questions are the ones in
-              this page: how to know which agent is asking, how to keep it to what the user meant, and who pays
-              when it gets it wrong.
+      <section className="relative isolate pt-14 pb-12 lg:pt-20">
+        <Guilloche className="absolute inset-y-0 left-1/2 -z-10 h-full w-screen -translate-x-1/2" />
+        <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
+          <div className="lg:pt-8">
+            <h1 className="text-[2.4rem] leading-[1.06] font-bold tracking-tight sm:text-[3.3rem]">
+              An AI agent just paid with your UPI. Was it allowed to?
+            </h1>
+            <p className="mt-6 max-w-lg text-[1.08rem] leading-relaxed text-ink-soft">
+              warrant sits between shopping agents and UPI. Your phone signs what an agent may do, every payment
+              it asks for is checked against that, and every decision lands in a log anyone can verify when a
+              payment is disputed.
             </p>
-            <p>
-              warrant is a service that sits between agents and UPI Reserve Pay or Circle. The user&apos;s phone
-              signs what an agent may do. Every payment the agent asks for is signed, checked against that, and
-              sent to the bank exactly once. Every decision goes into a tamper-evident log, so a disputed payment
-              comes with evidence anyone can check, and a rule that says who carries it.
+            <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-[0.98rem]">
+              <a href="#playground" className="bg-ink px-4 py-2.5 font-bold text-sheet hover:bg-ink-soft">
+                Try to get a payment past it
+              </a>
+              <Link href="/results" className="link self-center">
+                See what it catches
+              </Link>
+              <Link href="/verify" className="link self-center">
+                Tamper with an evidence pack
+              </Link>
+            </div>
+            <p className="mt-10 max-w-lg text-[0.86rem] leading-relaxed text-ink-faint">
+              Razorpay and NPCI ran agent payment pilots this year. In September NPCI put its agent payment
+              protocol on hold until there are safeguards. This is one go at them.
             </p>
           </div>
-          <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-[0.98rem]">
-            <Link href="/results" className="bg-ink px-4 py-2.5 font-bold text-sheet hover:bg-ink-soft">
-              See what it catches
-            </Link>
-            <Link href="/verify" className="link self-center">
-              Check an evidence pack in your browser
-            </Link>
-          </div>
+          <HeroSlip />
         </div>
-        <aside className="self-end border border-rule bg-sheet">
-          <p className="border-b border-rule px-5 py-3 text-[0.86rem] text-ink-soft">
-            On the same {caps ? `${caps.families.reduce((n, f) => n + f.unwanted, 0)}` : ""} unwanted payments from
-            the attack corpus
-          </p>
-          {a && ca ? (
-            <dl className="grid grid-cols-2">
-              <Stat label="paid under mandate caps alone" value={pct(ca.unwanted_paid, ca.unwanted)} sub={rupees(ca.money_lost) + " lost"} />
-              <Stat label="paid under warrant" value={pct(a.unwanted_paid, a.unwanted)} sub={rupees(a.money_lost) + " lost"} accent />
-              <Stat
-                label="payments users wanted that warrant asked about"
-                value={pct(b!.wanted_asked, b!.wanted)}
-                sub={`${b!.wanted_asked} of ${b!.wanted}`}
-              />
-              <Stat label="payments users wanted that warrant refused" value={pct(b!.wanted_refused, b!.wanted)} sub={`${b!.wanted_refused} of ${b!.wanted}`} />
-            </dl>
-          ) : (
-            <p className="px-5 py-6 text-[0.92rem] text-ink-soft">
-              The evaluation has not been run in this build. <code className="c">make eval</code> writes it.
-            </p>
-          )}
-          <p className="border-t border-rule px-5 py-3 text-[0.8rem] leading-snug text-ink-faint">
-            A synthetic corpus, not real traffic. <Link href="/results" className="link">How it was made</Link>.
-          </p>
-        </aside>
       </section>
+
+      {a && ca && b && (
+        <dl className="grid border-y border-rule-strong bg-sheet sm:grid-cols-2 lg:grid-cols-4">
+          <Stat label="attack payments paid, mandate caps alone" value={pct(ca.unwanted_paid, ca.unwanted)} sub={`${ca.unwanted_paid} of ${ca.unwanted}, ${rupees(ca.money_lost)} lost`} />
+          <Stat label="attack payments paid, warrant" value={pct(a.unwanted_paid, a.unwanted)} sub={`${a.unwanted_paid} of ${a.unwanted}, ${rupees(a.money_lost)} lost`} accent />
+          <Stat label="wanted payments warrant asked about" value={pct(b.wanted_asked, b.wanted)} sub={`${b.wanted_asked} of ${b.wanted}`} />
+          <Stat label="wanted payments warrant refused" value={pct(b.wanted_refused, b.wanted)} sub={`${b.wanted_refused} of ${b.wanted}`} />
+        </dl>
+      )}
+      <p className="mt-2 mb-10 text-[0.8rem] text-ink-faint">
+        On a synthetic corpus, not real traffic. <Link href="/results" className="link">How it was made</Link>.
+      </p>
+
+      <div className="perf" />
+
+      <Playground />
 
       <div className="perf" />
 
@@ -83,7 +80,8 @@ export default function Home() {
             </p>
             <p>
               The disputed order at the end comes with an evidence pack.{" "}
-              <Link href="/verify">Open it in the verifier</Link> and the same checks run on your machine.
+              <Link href="/verify">Open it in the verifier</Link>, edit it, and watch the same checks catch the
+              edit on your machine.
             </p>
           </div>
           <Ledger steps={story} />
@@ -146,6 +144,18 @@ export default function Home() {
 
       <div className="perf" />
 
+      <section className="py-14">
+        <h2 className="text-[1.6rem] leading-tight font-bold">Who carries a disputed payment</h2>
+        <p className="mt-3 mb-6 max-w-3xl leading-relaxed text-ink-soft">
+          Whoever had the last chance to stop it, and the evidence to know they should. The rule asks these
+          questions of a verified pack, in this order, and the first answer that settles it decides. Change the
+          answers to see where a payment lands.
+        </p>
+        <Liability />
+      </section>
+
+      <div className="perf" />
+
       <section className="grid gap-10 py-14 lg:grid-cols-[1fr_1fr]">
         <div className="prose-w">
           <h2 className="text-[1.6rem] leading-tight font-bold text-ink">What it does not catch</h2>
@@ -194,7 +204,7 @@ export default function Home() {
 
 function Stat({ label, value, sub, accent }: { label: string; value: string; sub: string; accent?: boolean }) {
   return (
-    <div className="border-rule px-5 py-4 odd:border-r [&:nth-child(-n+2)]:border-b">
+    <div className="border-b border-rule px-5 py-4 last:border-b-0 sm:odd:border-r lg:border-r lg:border-b-0 lg:last:border-r-0">
       <dd className={`num text-[2rem] leading-none font-bold ${accent ? "text-denied" : "text-ink"}`}>{value}</dd>
       <dt className="mt-2 text-[0.82rem] leading-snug text-ink-soft">{label}</dt>
       <p className="mono mt-1 text-[0.78rem] text-ink-faint">{sub}</p>
