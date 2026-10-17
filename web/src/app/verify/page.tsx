@@ -16,7 +16,9 @@ export default function VerifyPage() {
           one the policy gives. Then it applies the liability rule to the claim you pick.
         </p>
         <p>
-          The sample is the disputed order from the demo. Change a character in it and watch which checks fail.
+          The sample is the disputed order from the demo. Once it is loaded, tamper with it: raise the amount,
+          flip Asha&apos;s answer, lose a record, rewrite the decision. Each edit reruns the checks, marks the ones
+          that broke, and shows where the liability moves.
         </p>
       </div>
       <Verifier />

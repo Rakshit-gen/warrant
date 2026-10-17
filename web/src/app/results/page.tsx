@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { FamilyExplorer } from "@/components/family-explorer";
 import { benchResult, evalResult, familyLabel, mode, pct, rupees, type Tally } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Results" };
@@ -39,7 +40,11 @@ export default function Results() {
             </p>
           </div>
 
-          <h3 className="mt-10 text-[1.15rem] font-bold">Attacks</h3>
+          <div className="mt-8">
+            <FamilyExplorer caps={caps.families} full={full.families} />
+          </div>
+
+          <h3 className="mt-12 text-[1.15rem] font-bold">Attacks, every family</h3>
           <p className="mt-1 text-[0.92rem] text-ink-soft">Payments the user did not want: how many went through without anyone asking.</p>
           <Table
             head={["family", "attempts", "caps only: paid", "warrant: paid", "warrant: asked user", "warrant: refused", "lost, caps / warrant", "why warrant stopped it"]}

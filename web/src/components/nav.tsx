@@ -2,6 +2,7 @@ import Link from "next/link";
 import { repoUrl } from "@/lib/site";
 
 const links = [
+  { href: "/#playground", label: "Playground" },
   { href: "/results", label: "Results" },
   { href: "/verify", label: "Verify a pack" },
   { href: "/docs", label: "Docs" },

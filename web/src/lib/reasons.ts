@@ -1,0 +1,26 @@
+// What each policy reason code means, in a sentence a user would read on
+// their phone. The codes themselves come from policy/policy.go.
+export const reasonText: Record<string, string> = {
+  agent_unknown: "This agent is not registered.",
+  agent_suspended: "This agent was taken off.",
+  agent_not_on_mandate: "The mandate is for a different agent.",
+  stale_request: "The request is too old to trust.",
+  mandate_inactive: "The mandate was revoked.",
+  mandate_expired: "The mandate has expired.",
+  mandate_not_yet_valid: "The mandate has not started yet.",
+  merchant_not_on_mandate: "This merchant is not on the mandate.",
+  payee_not_merchant: "The money would go to a VPA that is not the merchant's.",
+  over_max_debit: "Over the limit for one payment.",
+  over_remaining: "More than what is left on the mandate.",
+  over_per_day: "Too many payments today.",
+  circle_cooling_period: "A new Circle link allows ₹5,000 a day for its first 24 hours.",
+  amount_not_cart_total: "The amount is not what the cart adds up to.",
+  category_not_on_mandate: "Something in the cart is outside what the user allowed.",
+  intent_invalid: "The errand receipt is not the user's.",
+  over_step_up_line: "Over the amount the user asked to be asked about.",
+  high_risk_item: "A gift card or something else that turns into cash.",
+  outside_intent: "Goes beyond the errand the user's phone signed.",
+  split_payment: "Looks like one big payment cut into small ones.",
+  unusual_amount: "Far bigger than this mandate's usual payments.",
+  burst: "Too many payments in a few minutes.",
+};
