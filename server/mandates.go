@@ -365,3 +365,136 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
+var (
+	errUnauthorized = errors.New("unauthorized")
+	errAlready      = errors.New("already done")
+)
+
+// StepUpView is a pending question for a user.
+type StepUpView struct {
+	ID        string          `json:"id"`
+	Request   string          `json:"request"` // request ID
+	Digest    string          `json:"digest"`  // what the user signs
+	Mandate   string          `json:"mandate"`
+	Agent     string          `json:"agent"`
+	Merchant  string          `json:"merchant"`
+	Amount    int64           `json:"amount"`
+	Cart      []wire.Item     `json:"cart"`
+	Reasons   json.RawMessage `json:"reasons"`
+	ExpiresAt time.Time       `json:"expires_at"`
+}
+
+func (s *Server) handleUserStepUps(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(r.Context(), `SELECT st.id, q.id, q.digest, q.mandate_id, q.agent_id, q.envelope, q.decision->'reasons', st.expires_at
+		FROM stepups st JOIN requests q ON q.id = st.request_id
+		WHERE st.user_id = $1 AND st.status = 'pending' AND st.expires_at > $2 ORDER BY st.created_at`, r.PathValue("id"), s.now())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []StepUpView{}
+	for rows.Next() {
+		var v StepUpView
+		var env sign.Envelope
+		if err := rows.Scan(&v.ID, &v.Request, &v.Digest, &v.Mandate, &v.Agent, &env, &v.Reasons, &v.ExpiresAt); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var req wire.DebitRequest
+		json.Unmarshal(env.Payload, &req)
+		v.Merchant, v.Amount, v.Cart = req.Merchant, req.Amount, req.Cart
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleStepUp takes the user's signed answer. An approval sends the debit
+// to the bank, after the same limit checks as any other debit.
+func (s *Server) handleStepUp(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := r.PathValue("id")
+	var env sign.Envelope
+	if !readJSON(w, r, &env) {
+		return
+	}
+	var ans wire.StepUp
+	var reqID string
+	var debit *Debit
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		var deviceKey, status, digest, mandateID string
+		var expires time.Time
+		err := tx.QueryRow(ctx, `SELECT u.device_key, st.status, st.expires_at, q.id, q.digest, q.mandate_id
+			FROM stepups st JOIN requests q ON q.id = st.request_id JOIN users u ON u.id = st.user_id
+			WHERE st.id = $1 FOR UPDATE OF st`, id).Scan(&deviceKey, &status, &expires, &reqID, &digest, &mandateID)
+		if err != nil {
+			return err
+		}
+		if err := env.Open(deviceKey, &ans); err != nil || ans.Type != "stepup" || ans.ID != id || ans.Request != digest {
+			return errUnauthorized
+		}
+		if status != "pending" {
+			return errAlready
+		}
+		if !s.now().Before(expires) {
+			return errExpired
+		}
+		newStatus := "declined"
+		if ans.Approve {
+			newStatus = "approved"
+		}
+		if _, err := tx.Exec(ctx, `UPDATE stepups SET status = $2, answer = $3, decided_at = $4 WHERE id = $1`, id, newStatus, env, s.now()); err != nil {
+			return err
+		}
+		if err := record(ctx, tx, "stepup", reqID, map[string]any{"type": "stepup", "id": id, "request": reqID, "signed": env, "at": s.now().UnixMilli()}); err != nil {
+			return err
+		}
+		if !ans.Approve {
+			return nil
+		}
+		// The user said yes; the limits still hold.
+		debit, err = s.openDebit(ctx, tx, reqID, mandateID)
+		return err
+	})
+	switch {
+	case notFound(err):
+		writeErr(w, http.StatusNotFound, "no such step-up")
+		return
+	case errors.Is(err, errUnauthorized):
+		writeErr(w, http.StatusUnauthorized, "answer is not signed by the user for this request")
+		return
+	case errors.Is(err, errAlready):
+		writeErr(w, http.StatusConflict, "already answered")
+		return
+	case errors.Is(err, errExpired):
+		writeErr(w, http.StatusGone, "step-up expired")
+		return
+	case errors.Is(err, errLimit):
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.events.publish("stepup", map[string]any{"id": id, "request": reqID, "approve": ans.Approve})
+	if debit != nil {
+		s.execute(*debit)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": map[bool]string{true: "approved", false: "declined"}[ans.Approve], "debit": debit})
+}
+
+var errExpired = errors.New("expired")
+
+func (s *Server) expireStepUps(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `UPDATE stepups SET status = 'expired' WHERE status = 'pending' AND expires_at <= $1`, s.now())
+	return err
+}
+
+func outbox(ctx context.Context, tx pgx.Tx, topic, key string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO outbox (topic, key, payload) VALUES ($1, $2, $3)`, topic, key, b)
+	return err
+}
