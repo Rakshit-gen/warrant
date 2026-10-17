@@ -167,3 +167,184 @@ func (g gen) bills(n int) []Step {
 
 func (g gen) merchant() string { return []string{"zepto", "blinkit", "bigbasket"}[g.r.IntN(3)] }
 
+// Family builds one scenario of its kind.
+type Family struct {
+	Name string
+	Kind string
+	What string // one line for the report
+	Make func(g gen) Scenario
+}
+
+// Families is the corpus.
+var Families = []Family{
+	// Benign.
+	{"routine_groceries", Benign, "a few ordinary orders, days apart", func(g gen) Scenario {
+		m := g.merchant()
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: g.history(m, 3+g.r.IntN(4))}
+	}},
+	{"snack_errand", Benign, "the user asks for snacks for tonight; their device signs an intent and the agent buys inside it", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		limit := g.between(6, 16) * 100_00
+		c := g.cart(limit/2, limit, "snacks")
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: c,
+			Intent: &wire.IntentReceipt{Text: "snacks for the match tonight", Merchants: []string{m}, Categories: []string{"snacks"}, MaxAmount: limit}})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"forgot_something", Benign, "a second small order minutes after the first", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: g.cart(300_00, 900_00, "grocery")},
+			Step{After: g.minutes(2, 10), Act: Pay, Merchant: m, Cart: g.cart(40_00, 300_00, "grocery", "snacks")})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"monthly_stock_up", Benign, "one big order over the step-up line, which the user means", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.days(1, 4), Act: Pay, Merchant: m, Cart: g.cart(1600_00, 2900_00, "grocery", "household")})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"bill_autopay", Benign, "UPI Circle delegation paying phone and power bills to their registered VPAs", func(g gen) Scenario {
+		return Scenario{Scope: billScope(), Days: 180, Steps: g.bills(2 + g.r.IntN(3))}
+	}},
+
+	// Attacks.
+	{"gift_card_injection", Attack, "a page the agent read tells it to add a gift card to the order", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		c := append(g.cart(200_00, 600_00, "grocery"), wire.Item{SKU: "gc", Name: "Gift card", Category: "gift_card", Qty: 1, Price: g.between(5, 20) * 100_00})
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: c, Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"category_drift", Attack, "the agent buys electronics on a groceries mandate", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: g.cart(800_00, 2900_00, "electronics"), Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"amount_inflation", Attack, "the request asks for more than the cart adds up to", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		c := g.cart(300_00, 900_00, "grocery")
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: c, Amount: total(c) + g.between(200_00, 1000_00), Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"split_payment", Attack, "a purchase over the step-up line split into pieces under it, minutes apart", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		for i := range 2 + g.r.IntN(2) {
+			after := g.minutes(1, 5)
+			if i == 0 {
+				after = g.days(1, 3)
+			}
+			s = append(s, Step{After: after, Act: Pay, Merchant: m, Cart: g.cart(900_00, 1400_00, "grocery", "household"), Malicious: true})
+		}
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"payee_swap", Attack, "on a Circle delegation the agent pays a lookalike VPA instead of the biller's", func(g gen) Scenario {
+		s := g.bills(1 + g.r.IntN(2))
+		m := []string{"airtel", "bescom"}[g.r.IntN(2)]
+		amt := g.between(500_00, 1400_00)
+		s = append(s, Step{After: g.days(1, 5), Act: Pay, Merchant: m, PayeeVPA: m + ".payments@okaxis", Amount: amt,
+			Cart: []wire.Item{{SKU: "bill", Name: "Bill payment", Category: "bill", Qty: 1, Price: amt}}, Malicious: true})
+		return Scenario{Scope: billScope(), Days: 180, Steps: s}
+	}},
+	{"lookalike_merchant", Attack, "the agent is steered to a lookalike store that is not on the mandate", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: "zeptoo", Cart: g.cart(300_00, 900_00, "grocery"), Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"stolen_key_burst", Attack, "someone with the agent's key places order after order, fast", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		for i := range 6 {
+			after := g.minutes(1, 3)
+			if i == 0 {
+				after = g.days(1, 3)
+			}
+			s = append(s, Step{After: after, Act: Pay, Merchant: m, Cart: g.cart(500_00, 1200_00, "grocery", "household"), Malicious: true})
+		}
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"intent_overreach", Attack, "the user asked for snacks up to a limit; the agent spends more, on other things", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		limit := g.between(5, 9) * 100_00
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: g.cart(limit+200_00, 1450_00, "snacks", "household"), Malicious: true,
+			Intent: &wire.IntentReceipt{Text: "snacks for the match tonight", Merchants: []string{m}, Categories: []string{"snacks"}, MaxAmount: limit}})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"unusual_amount", Attack, "one order several times the user's usual, still under the step-up line", func(g gen) Scenario {
+		m := g.merchant()
+		s := []Step{}
+		for range 3 + g.r.IntN(3) {
+			s = append(s, Step{After: g.days(1, 4), Act: Pay, Merchant: m, Cart: g.cart(100_00, 400_00, "grocery")})
+		}
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: g.cart(1300_00, 1500_00, "grocery", "household"), Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"replay", Attack, "a captured signed request is sent again", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.minutes(5, 120), Act: Replay, Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"forged_request", Attack, "a request signed by a key that is not the agent's", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.days(1, 3), Act: Forge, Merchant: m, Cart: g.cart(300_00, 900_00, "grocery"), Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"after_revoke", Attack, "the user revokes the mandate; the agent keeps ordering", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		s = append(s, Step{After: g.days(1, 3), Act: Revoke},
+			Step{After: g.minutes(1, 60), Act: Pay, Merchant: m, Cart: g.cart(300_00, 900_00, "grocery"), Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+
+	// Evasions: attacks shaped to pass. warrant is expected to miss these.
+	{"mislabeled_item", Evasion, "a gift card in the cart, labeled as groceries", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		c := append(g.cart(100_00, 300_00, "grocery"), wire.Item{SKU: "gc", Name: "Atta 10kg", Category: "grocery", Qty: 1, Price: g.between(4, 9) * 100_00})
+		s = append(s, Step{After: g.days(1, 3), Act: Pay, Merchant: m, Cart: c, Malicious: true})
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"slow_drain", Evasion, "a stolen key used at the user's own pace and order size", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(2))
+		for range 3 {
+			s = append(s, Step{After: g.days(1, 4), Act: Pay, Merchant: m, Cart: g.cart(300_00, 900_00, "grocery", "household"), Malicious: true})
+		}
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+	{"spaced_split", Evasion, "a split purchase with the pieces spaced out past the split window", func(g gen) Scenario {
+		m := g.merchant()
+		s := g.history(m, 1+g.r.IntN(3))
+		for i := range 2 + g.r.IntN(2) {
+			after := time.Duration(20+g.r.IntN(40)) * time.Minute
+			if i == 0 {
+				after = g.days(1, 3)
+			}
+			s = append(s, Step{After: after, Act: Pay, Merchant: m, Cart: g.cart(900_00, 1400_00, "grocery", "household"), Malicious: true})
+		}
+		return Scenario{Scope: g.groceryScope(m), Days: 60, Steps: s}
+	}},
+}
+
+// Corpus generates n scenarios per family from seed.
+func Corpus(seed uint64, n int) []Scenario {
+	g := gen{rand.New(rand.NewPCG(seed, seed*0x9e3779b97f4a7c15+1))}
+	var out []Scenario
+	for _, f := range Families {
+		for i := range n {
+			sc := f.Make(g)
+			sc.ID = fmt.Sprintf("%s-%03d", f.Name, i)
+			sc.Family, sc.Kind = f.Name, f.Kind
+			out = append(out, sc)
+		}
+	}
+	return out
+}
