@@ -75,3 +75,51 @@ func cmdKeygen(_ context.Context, args []string) error {
 	fmt.Println(k.PubString())
 	return nil
 }
+
+func cmdVerify(_ context.Context, args []string) error {
+	fs := flag.NewFlagSet("verify", flag.ExitOnError)
+	claim := fs.String("claim", evidence.Unauthorized, "unauthorized, not_delivered or wrong_item")
+	asJSON := fs.Bool("json", false, "print the report and ruling as JSON")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: warrant verify [-claim c] [-json] pack.json")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errors.New("one pack file is needed")
+	}
+	b, err := os.ReadFile(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	var p evidence.Pack
+	if err := json.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("%s is not an evidence pack: %w", fs.Arg(0), err)
+	}
+	rep := evidence.Verify(p)
+	ruling := evidence.Rule(rep, *claim)
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"report": rep, "ruling": ruling})
+	}
+	for _, c := range rep.Checks {
+		mark := "ok  "
+		if !c.OK {
+			mark = "FAIL"
+		}
+		fmt.Printf("%s %s", mark, c.Name)
+		if c.Detail != "" {
+			fmt.Printf(": %s", c.Detail)
+		}
+		fmt.Println()
+	}
+	fmt.Printf("\nclaim %s: %s carries it", ruling.Claim, ruling.Liable)
+	if ruling.Refund {
+		fmt.Print(", the user is refunded")
+	}
+	fmt.Printf("\n  %s\n", strings.Join(ruling.Why, "\n  "))
+	if !rep.OK {
+		os.Exit(3)
+	}
+	return nil
+}
