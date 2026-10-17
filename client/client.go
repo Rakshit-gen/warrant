@@ -205,3 +205,97 @@ type Mandate struct {
 	InFlight int64      `json:"in_flight"`
 }
 
+// Agent is an AI agent's side: its ID and registered key.
+type Agent struct {
+	API *API
+	ID  string
+	Key sign.Key
+}
+
+// Result is warrant's answer to a debit request.
+type Result struct {
+	Request   string   `json:"request"`
+	Outcome   string   `json:"outcome"`
+	Reasons   []Reason `json:"reasons"`
+	StepUp    *string  `json:"stepup"`
+	Debit     *Debit   `json:"debit"`
+	Duplicate bool     `json:"duplicate"`
+}
+
+// Debit is a payment warrant approved. Status is pending, unknown (sent,
+// no answer from the bank yet), succeeded or failed.
+type Debit struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	Amount   int64  `json:"amount"`
+	Attempts int    `json:"attempts"`
+	Error    string `json:"error"`
+}
+
+// Reason is one check that fired.
+type Reason struct {
+	Code   string `json:"code"`
+	Hard   bool   `json:"hard"` // a hard reason denies; a soft one asks the user
+	Detail string `json:"detail"`
+}
+
+// Has reports whether the answer carries a reason code.
+func (r Result) Has(code string) bool {
+	for _, x := range r.Reasons {
+		if x.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// Pay signs and sends a debit request. Fields left empty are filled: the
+// agent, a fresh nonce, the time, and an idempotency key if none is given.
+// Retrying an errand should reuse its IdemKey.
+func (a Agent) Pay(ctx context.Context, req wire.DebitRequest, intent *sign.Envelope) (Result, error) {
+	req.Type, req.Agent = "debit", a.ID
+	if req.Nonce == "" {
+		req.Nonce = Nonce()
+	}
+	if req.TS == 0 {
+		req.TS = a.API.now().UnixMilli()
+	}
+	if req.IdemKey == "" {
+		req.IdemKey = Nonce()
+	}
+	env, err := a.Key.Seal(req)
+	if err != nil {
+		return Result{}, err
+	}
+	return a.Send(ctx, env, intent)
+}
+
+// Send posts an already signed request, as a retry or a replay would.
+func (a Agent) Send(ctx context.Context, env sign.Envelope, intent *sign.Envelope) (Result, error) {
+	var res Result
+	_, err := a.API.Do(ctx, "POST", "/v1/debits", map[string]any{"request": env, "intent": intent}, &res)
+	return res, err
+}
+
+// Poll fetches the current state of a request.
+func (a *API) Poll(ctx context.Context, request string) (Result, error) {
+	var res Result
+	_, err := a.Do(ctx, "GET", "/v1/requests/"+request, nil, &res)
+	return res, err
+}
+
+// Evidence fetches a debit's dispute pack.
+func (a *API) Evidence(ctx context.Context, debit string) (evidence.Pack, error) {
+	var p evidence.Pack
+	_, err := a.Do(ctx, "GET", "/v1/debits/"+debit+"/evidence", nil, &p)
+	return p, err
+}
+
+// Dispute asks for a ruling.
+func (a *API) Dispute(ctx context.Context, debit, claim string) (evidence.Ruling, error) {
+	var out struct {
+		Ruling evidence.Ruling `json:"ruling"`
+	}
+	_, err := a.Do(ctx, "POST", "/v1/disputes", map[string]string{"debit": debit, "claim": claim}, &out)
+	return out.Ruling, err
+}
