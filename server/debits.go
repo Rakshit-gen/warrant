@@ -285,3 +285,118 @@ func (s *Server) openDebit(ctx context.Context, tx pgx.Tx, reqID, mandateID stri
 	return d, err
 }
 
+// execute sends a debit to the bank and records what came back. Before the
+// call the debit is marked unknown, so a crash mid-call leaves it for the
+// reconciler rather than looking unsent.
+func (s *Server) execute(d Debit) Debit {
+	s.executing.Add(1)
+	defer s.executing.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if d.block == "" {
+		if err := s.db.QueryRow(ctx, `SELECT block_ref FROM mandates WHERE id = $1`, d.Mandate).Scan(&d.block); err != nil {
+			return d
+		}
+	}
+	if err := s.db.QueryRow(ctx, `UPDATE debits SET status = 'unknown', attempts = attempts + 1, updated_at = $2 WHERE id = $1 AND status IN ('pending', 'unknown') RETURNING attempts`, d.ID, s.now()).Scan(&d.Attempts); err != nil {
+		return d // someone else finished it
+	}
+	d.Status = "unknown"
+	t0 := time.Now()
+	err := s.cfg.Rail.Debit(ctx, d.block, d.ID, d.Amount)
+	s.m.observe("warrant_bank_seconds", time.Since(t0).Seconds())
+	switch {
+	case err == nil:
+		s.finish(&d, "succeeded", "")
+	case errors.Is(err, bank.ErrDeclined):
+		s.finish(&d, "failed", err.Error())
+	default:
+		// No answer. The money may have moved; only the bank knows.
+		s.m.inc("warrant_bank_unknown_total")
+		s.db.Exec(ctx, `UPDATE debits SET last_error = $2 WHERE id = $1`, d.ID, err.Error())
+		d.Error = err.Error()
+	}
+	return d
+}
+
+// finish moves a debit to its final state, once.
+func (s *Server) finish(d *Debit, status, errMsg string) {
+	ctx := context.Background()
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE debits SET status = $2, last_error = nullif($3, ''), updated_at = $4, settled_at = $4 WHERE id = $1 AND status IN ('pending', 'unknown')`, d.ID, status, errMsg, s.now())
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		if err := record(ctx, tx, "debit", d.Request, map[string]any{"type": "debit", "id": d.ID, "request": d.Request, "mandate": d.Mandate, "amount": d.Amount, "status": status, "attempts": d.Attempts, "error": errMsg, "at": s.now().UnixMilli()}); err != nil {
+			return err
+		}
+		return outbox(ctx, tx, "warrant.debits", d.Mandate, map[string]any{"debit": d.ID, "request": d.Request, "status": status, "amount": d.Amount})
+	})
+	if err != nil {
+		s.log.Error("finish debit", "debit", d.ID, "err", err)
+		return
+	}
+	d.Status, d.Error = status, errMsg
+	s.m.inc(fmt.Sprintf(`warrant_debits_total{status=%q}`, status))
+	s.events.publish("debit", map[string]any{"id": d.ID, "request": d.Request, "mandate": d.Mandate, "amount": d.Amount, "status": status})
+}
+
+// Reconcile settles debits the bank never answered, and sends debits that
+// were approved but never sent (a crash between commit and call). It asks
+// the bank before ever sending again, and sends again under the same
+// transaction ID, so the bank's own idempotency is the last guard.
+func (s *Server) Reconcile(ctx context.Context, olderThan time.Duration) (int, error) {
+	rows, err := s.db.Query(ctx, `SELECT d.id, d.request_id, d.mandate_id, d.merchant, d.amount, d.status, d.attempts, d.created_at, m.block_ref
+		FROM debits d JOIN mandates m ON m.id = d.mandate_id
+		WHERE d.status IN ('pending', 'unknown') AND d.updated_at < $1 ORDER BY d.updated_at LIMIT 500`, s.now().Add(-olderThan))
+	if err != nil {
+		return 0, err
+	}
+	type open struct {
+		Debit
+		created time.Time
+	}
+	var todo []open
+	for rows.Next() {
+		var o open
+		if err := rows.Scan(&o.ID, &o.Request, &o.Mandate, &o.Merchant, &o.Amount, &o.Status, &o.Attempts, &o.created, &o.block); err != nil {
+			return 0, err
+		}
+		todo = append(todo, o)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	done := 0
+	for _, o := range todo {
+		d := o.Debit
+		if d.Status == "pending" {
+			s.execute(d)
+			done++
+			continue
+		}
+		st, err := s.cfg.Rail.Status(ctx, d.ID)
+		if err != nil {
+			continue // ask again next round
+		}
+		switch st {
+		case bank.Success:
+			s.finish(&d, "succeeded", "")
+		case bank.Declined:
+			s.finish(&d, "failed", "declined by the bank")
+		default:
+			// The bank never saw it. Reserve Pay allows three attempts in a day.
+			if d.Attempts < wire.ReservePayMaxRetries && s.now().Sub(o.created) < 24*time.Hour {
+				s.execute(d)
+			} else {
+				s.finish(&d, "failed", fmt.Sprintf("not delivered after %d attempts", d.Attempts))
+			}
+		}
+		done++
+	}
+	if done > 0 {
+		s.m.add("warrant_reconciled_total", float64(done))
+	}
+	return done, nil
+}
+
