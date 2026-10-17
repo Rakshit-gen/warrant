@@ -400,3 +400,75 @@ func (s *Server) Reconcile(ctx context.Context, olderThan time.Duration) (int, e
 	return done, nil
 }
 
+// existing finds an earlier request with this idempotency key.
+func (s *Server) existing(ctx context.Context, agent, idem, digest string) (Result, bool, error) {
+	var id, old string
+	err := s.db.QueryRow(ctx, `SELECT id, digest FROM requests WHERE agent_id = $1 AND idem_key = $2`, agent, idem).Scan(&id, &old)
+	if notFound(err) {
+		return Result{}, false, nil
+	}
+	if err != nil {
+		return Result{}, false, err
+	}
+	if old != digest {
+		return Result{}, false, errors.New("idempotency key already used for a different request")
+	}
+	res, err := s.result(ctx, id)
+	res.Duplicate = true
+	return res, err == nil, err
+}
+
+func (s *Server) result(ctx context.Context, id string) (Result, error) {
+	var res Result
+	var dec policy.Decision
+	err := s.db.QueryRow(ctx, `SELECT id, decision FROM requests WHERE id = $1`, id).Scan(&res.Request, &dec)
+	if err != nil {
+		return res, err
+	}
+	res.Outcome, res.Reasons = dec.Outcome, dec.Reasons
+	var st, stStatus string
+	if err := s.db.QueryRow(ctx, `SELECT id, status FROM stepups WHERE request_id = $1`, id).Scan(&st, &stStatus); err == nil {
+		res.StepUp = &st
+		switch stStatus {
+		case "declined", "expired":
+			res.Outcome = policy.Deny
+		}
+	}
+	var d Debit
+	err = s.db.QueryRow(ctx, `SELECT id, request_id, mandate_id, merchant, amount, status, attempts, coalesce(last_error, '') FROM debits WHERE request_id = $1`, id).
+		Scan(&d.ID, &d.Request, &d.Mandate, &d.Merchant, &d.Amount, &d.Status, &d.Attempts, &d.Error)
+	if err == nil {
+		res.Debit = &d
+		res.Outcome = policy.Approve
+	}
+	return res, nil
+}
+
+func (s *Server) handleGetRequest(w http.ResponseWriter, r *http.Request) {
+	res, err := s.result(r.Context(), r.PathValue("id"))
+	if notFound(err) {
+		writeErr(w, http.StatusNotFound, "no such request")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleMandateRequests is the activity on a mandate, newest first.
+func (s *Server) handleMandateRequests(w http.ResponseWriter, r *http.Request) {
+	s.list(w, r, `SELECT coalesce(jsonb_agg(x ORDER BY x->>'at' DESC), '[]') FROM (
+		SELECT jsonb_build_object('id', q.id, 'at', q.created_at, 'outcome', q.outcome, 'reasons', q.decision->'reasons',
+			'request', convert_from(decode(q.envelope->>'payload', 'base64'), 'UTF8')::jsonb,
+			'stepup', st.status, 'debit', d.id, 'debit_status', d.status) AS x
+		FROM requests q LEFT JOIN stepups st ON st.request_id = q.id LEFT JOIN debits d ON d.request_id = q.id
+		WHERE q.mandate_id = $1 ORDER BY q.created_at DESC LIMIT 200) t`, r.PathValue("id"))
+}
+
+func newID(prefix string) string {
+	b := make([]byte, 10)
+	rand.Read(b)
+	return prefix + "_" + hex.EncodeToString(b)
+}
