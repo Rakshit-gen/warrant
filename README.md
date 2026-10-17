@@ -61,6 +61,67 @@ built so the answer can be checked.
 - **Liability.** A written rule for who carries a disputed payment,
   including warrant itself when its own log does not support what it did.
 
+## Results
+
+All numbers below come from `results/eval.json` and `results/bench.json`
+in this repo, from one run on a Mac (darwin/arm64, 10
+CPUs, Postgres 14). `make eval` and `make bench` reproduce them.
+
+### Evaluation
+
+800 synthetic sessions (40 per family, seed 1), 2,945 payment attempts,
+replayed twice through warrantd, Postgres and the bank simulator: once
+checking only what a mandate checks, once with the full policy. When
+warrant asks, the simulated user approves what they wanted and declines
+what they did not; that they always notice is the most generous
+assumption here.
+
+| | caps only | warrant |
+|---|--:|--:|
+| attack payments paid without anyone asking | 578 of 738 | 122 of 738 |
+| money lost to attacks | ₹5,56,192 | ₹93,696 |
+| attack payments sent to the user to decide | 0 | 319 |
+| ordinary payments (benign families) asked about | 0 of 701 | 40 of 701 |
+| ordinary payments refused | 0 | 0 |
+| evasion payments paid | 258 of 258 | 252 of 258 |
+
+- Gift card injection, amount inflation, payee swap, intent overreach and
+  unusual amounts: 0 of 40 paid each under warrant, 40 of 40 under caps.
+- Split payments: 38 of 98 still paid. The split check only looks at the
+  15 minutes before; the first pieces of a split are under the line and
+  pass.
+- Stolen key burst: 80 of 240 paid. Each burst gets payments through
+  before the split or burst checks have anything to compare with.
+- Lookalike merchants, replays, forged requests and payments after a
+  revoke were already stopped by caps alone (the mandate names its
+  merchant, and signatures and nonces are checked either way).
+- The 40 questions on ordinary use are all the monthly stock-up family:
+  one order per session over the step-up line the user set.
+- Evasions get through, as built: an item labeled as groceries, a slow
+  drain under every line, and splits spaced past the window. warrant
+  trusts the cart's categories and has no long-window spend model.
+
+The corpus is synthetic. It shows what the checks do on these patterns,
+not how often the patterns happen.
+
+### Benchmark
+
+Run while another benchmark was using the same machine, so read the
+shape, not the exact figures.
+
+- **Decisions under load:** 10,000 signed requests from 32 concurrent
+  agents on 500 mandates, 1,904 decisions/s. Latency p50 10.4 ms, p99
+  57.7 ms. Approvals, which include a 30 ms simulated bank call: p50
+  33.8 ms, p99 63.2 ms. 8,000 of the 10,000 were step-ups: each mandate
+  gets 20 requests back to back, and from the fifth on the burst check
+  asks the user.
+- **The books after a faulty bank:** 500 requests racing on 10 mandates
+  through a bank that drops 5% of calls and loses 15% of replies. 160
+  approved, exactly what the caps allow; 33 replies lost and 6 debits
+  resent under the same transaction ID; all settled in 2.7 s. The bank
+  has 160 debits and warrant has 160, with 0 blocks that disagree and 0
+  overspent.
+
 ## Run it
 
 ```sh
