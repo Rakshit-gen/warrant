@@ -1,0 +1,43 @@
+{
+  "when": "2026-10-17T20:06:46.785236Z",
+  "machine": "darwin/arm64, 10 CPUs",
+  "postgres": "14.20 (Homebrew)",
+  "load": {
+    "mandates": 500,
+    "workers": 32,
+    "requests": 10000,
+    "seconds": 5.252827667,
+    "per_second": 1903.7365460936985,
+    "by_outcome": {
+      "approve": 2000,
+      "step_up": 8000
+    },
+    "latency_ms": {
+      "max": 188.809,
+      "p50": 10.371,
+      "p90": 34.777,
+      "p99": 57.742
+    },
+    "approve_latency_ms": {
+      "max": 89.998,
+      "p50": 33.787,
+      "p90": 38.887,
+      "p99": 63.245
+    },
+    "bank_latency": "30ms"
+  },
+  "books": {
+    "mandates": 10,
+    "requests": 500,
+    "faults": "5% dropped, 15% lost replies, up to 20ms jitter",
+    "approved": 160,
+    "approved_want": 160,
+    "left_unknown": 33,
+    "resent": 6,
+    "bank_debits": 160,
+    "warrant_debits": 160,
+    "mismatched_blocks": 0,
+    "overspent_blocks": 0,
+    "settle_seconds": 2.652842917
+  }
+}
