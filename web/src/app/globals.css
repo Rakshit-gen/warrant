@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/*
+ * warrant's pages look like the paperwork they stand for. The ground is
+ * the pale grey-green of stamp paper, text is plain dark ink, and rules
+ * are hairlines. Four colours carry meaning and nothing else uses them:
+ * ledger green is money that moved because it was allowed, ochre is a
+ * payment held for the user, seal red is a payment refused, slate is a
+ * request that never reached the rules (bad signature, replay).
+ */
+:root {
+  --ground: #edefe8;
+  --sheet: #f7f7f2;
+  --rule: #cdd3c8;
+  --rule-strong: #a9b1a4;
+  --ink: #18201b;
+  --ink-soft: #4a5450;
+  --ink-faint: #7a837d;
+
+  --paid: #2d6a4b;
+  --asked: #a8721a;
+  --denied: #a3302a;
+  --rejected: #59606b;
+
+  --paid-tint: #dce8df;
+  --asked-tint: #f0e5cf;
+  --denied-tint: #f1dcd8;
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-sheet: var(--sheet);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-paid: var(--paid);
+  --color-asked: var(--asked);
+  --color-denied: var(--denied);
+  --color-rejected: var(--rejected);
+  --color-paid-tint: var(--paid-tint);
+  --color-asked-tint: var(--asked-tint);
+  --color-denied-tint: var(--denied-tint);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+:where(a, button, input, label, summary):focus-visible {
+  outline: 2px solid var(--denied);
+  outline-offset: 2px;
+}
+
+.mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Running text on the pages. */
+.prose-w p {
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+.prose-w p + p {
+  margin-top: 0.9rem;
+}
+.prose-w a,
+a.link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 3px;
+}
+.prose-w a:hover,
+a.link:hover {
+  text-decoration-color: var(--ink);
+}
+.prose-w code,
+code.c {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.86em;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  padding: 0.05rem 0.3rem;
+}
+
+/* A counterfoil edge: the dashed line a cheque tears along. */
+.perf {
+  background-image: linear-gradient(to right, var(--rule-strong) 50%, transparent 50%);
+  background-size: 10px 1px;
+  background-repeat: repeat-x;
+  height: 1px;
+}
