@@ -125,3 +125,83 @@ func (a *API) SuspendAgent(ctx context.Context, id, reason string, compromisedSi
 	return err
 }
 
+// Device is the user's side: their UPI app and the key it holds.
+type Device struct {
+	API  *API
+	User string
+	Key  sign.Key
+}
+
+// Grant signs a scope and creates the mandate.
+func (d Device) Grant(ctx context.Context, sc wire.Scope) (Mandate, error) {
+	sc.Type, sc.User = "scope", d.User
+	env, err := d.Key.Seal(sc)
+	if err != nil {
+		return Mandate{}, err
+	}
+	var m Mandate
+	_, err = d.API.Do(ctx, "POST", "/v1/mandates", env, &m)
+	return m, err
+}
+
+// Intent signs an intent receipt for one errand. The agent sends it along
+// with its request.
+func (d Device) Intent(ir wire.IntentReceipt) (sign.Envelope, error) {
+	ir.Type, ir.User = "intent", d.User
+	return d.Key.Seal(ir)
+}
+
+// Revoke ends a mandate.
+func (d Device) Revoke(ctx context.Context, mandate string) error {
+	env, err := d.Key.Seal(wire.Revocation{Type: "revoke", Mandate: mandate, TS: d.API.now().UnixMilli()})
+	if err != nil {
+		return err
+	}
+	_, err = d.API.Do(ctx, "POST", "/v1/mandates/"+mandate+"/revoke", env, nil)
+	return err
+}
+
+// StepUp is a question waiting for the user.
+type StepUp struct {
+	ID       string          `json:"id"`
+	Request  string          `json:"request"`
+	Digest   string          `json:"digest"`
+	Mandate  string          `json:"mandate"`
+	Agent    string          `json:"agent"`
+	Merchant string          `json:"merchant"`
+	Amount   int64           `json:"amount"`
+	Cart     []wire.Item     `json:"cart"`
+	Reasons  json.RawMessage `json:"reasons"`
+}
+
+// Pending lists the user's open step-ups.
+func (d Device) Pending(ctx context.Context) ([]StepUp, error) {
+	var out []StepUp
+	_, err := d.API.Do(ctx, "GET", "/v1/users/"+d.User+"/stepups", nil, &out)
+	return out, err
+}
+
+// Answer approves or declines a step-up.
+func (d Device) Answer(ctx context.Context, st StepUp, approve bool) (map[string]any, error) {
+	env, err := d.Key.Seal(wire.StepUp{Type: "stepup", ID: st.ID, Request: st.Digest, Approve: approve, TS: d.API.now().UnixMilli()})
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	_, err = d.API.Do(ctx, "POST", "/v1/stepups/"+st.ID, env, &out)
+	return out, err
+}
+
+// Mandate as the API returns it.
+type Mandate struct {
+	ID       string     `json:"id"`
+	User     string     `json:"user"`
+	Agent    string     `json:"agent"`
+	Kind     string     `json:"kind"`
+	Scope    wire.Scope `json:"scope"`
+	BlockRef string     `json:"block_ref"`
+	Status   string     `json:"status"`
+	Spent    int64      `json:"spent"`
+	InFlight int64      `json:"in_flight"`
+}
+
