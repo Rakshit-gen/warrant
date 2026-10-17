@@ -47,6 +47,7 @@
 }
 
 body {
+  overflow-x: clip;
   background: var(--ground);
   color: var(--ink);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
@@ -220,6 +221,25 @@ code.c {
   .stamp-big,
   .slip,
   .countdown {
+    animation: none;
+  }
+}
+
+/* The payments going past under the hero. The list is doubled, so
+   moving it left by half loops without a jump. */
+@keyframes feed {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.feed {
+  animation: feed 90s linear infinite;
+}
+.feed:hover {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed {
     animation: none;
   }
 }
