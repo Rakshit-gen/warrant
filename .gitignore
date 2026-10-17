@@ -1,0 +1,16 @@
+/bin/
+/dist/
+/.pgdata/
+*.test
+*.key
+pack.json
+coverage.txt
+
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+web/AGENTS.md
+web/CLAUDE.md
+web/src/data/eval.json
+web/src/data/bench.json
