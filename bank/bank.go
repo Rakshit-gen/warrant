@@ -199,3 +199,36 @@ func (s *Sim) Revoke(ctx context.Context, blockID string) error {
 	return nil
 }
 
+// Audit is the bank's own view, for checking warrant against it.
+type Audit struct {
+	Debited map[string]int64 `json:"debited"` // per block
+	Txns    int              `json:"txns"`    // successful debits
+}
+
+// Audit reports what actually moved.
+func (s *Sim) Audit() Audit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := Audit{Debited: map[string]int64{}}
+	for _, t := range s.txns {
+		if t.status == Success {
+			a.Debited[t.block] += t.amount
+			a.Txns++
+		}
+	}
+	return a
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
